@@ -1,0 +1,26 @@
+{
+  "name": "even-g2-soniox-captions",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "client",
+    "plugin",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "build:shared": "npm --workspace @even-g2/shared run build",
+    "build:client": "npm --workspace client run build",
+    "build:plugin": "npm --workspace plugin run build",
+    "build:server": "npm --workspace server run build",
+    "build": "npm run build:shared && npm run build:client && npm run build:plugin && npm run build:server",
+    "typecheck:shared": "npm --workspace @even-g2/shared run typecheck",
+    "typecheck:client": "npm --workspace client run typecheck",
+    "typecheck:plugin": "npm --workspace plugin run typecheck",
+    "typecheck:server": "npm --workspace server run typecheck",
+    "typecheck": "npm run typecheck:shared && npm run typecheck:client && npm run typecheck:plugin && npm run typecheck:server",
+    "dev:client": "npm --workspace client run dev",
+    "dev:plugin": "npm --workspace plugin run dev",
+    "dev:server": "npm run build:shared && npm --workspace server run dev"
+  }
+}
