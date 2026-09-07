@@ -11,6 +11,12 @@ import { mountUi, setStatus, setTranscript } from "./ui";
 
 mountUi();
 
+interface CaptionState {
+  line1: string;
+  line2: string;
+  activeLine: string;
+}
+
 const apiKey = import.meta.env.VITE_STT_API_KEY as string | undefined;
 
 if (!apiKey) {
@@ -22,8 +28,7 @@ setStatus("connecting", "Waiting for Even bridge…");
 
 const bridge = await waitForEvenAppBridge();
 setStatus("connecting", "Even bridge connected · creating transcript page");
-const MAX_VISIBLE_FINAL_UTTERANCES = 2;
-const MAX_VISIBLE_TRANSCRIPT_CHARACTERS = 200;
+const MAX_ACTIVE_LINE_CHARACTERS = 50;
 
 const transcriptContainer = new TextContainerProperty({
   xPosition: 18,
@@ -57,23 +62,16 @@ let renderTimer: number | null = null;
 let currentContent = "Listening…";
 let hasSeenAudio = false;
 let cleanedUp = false;
+let captionState: CaptionState = createEmptyCaptionState();
+let finalizedUtteranceCount = 0;
+let lastRawInterim = "";
+let committedInterimText = "";
+let liveInterimText = "";
 
 const stt = startSttStream(
   apiKey,
   ({ finalText, interimText }) => {
-    const nextContent = buildGlassesTranscript(finalText, interimText);
-
-    if (nextContent.length > MAX_VISIBLE_TRANSCRIPT_CHARACTERS) {
-      stt.resetTranscript();
-      currentContent = "Listening…";
-      setTranscript("", "");
-      scheduleGlassesRender();
-      return;
-    }
-
-    currentContent = nextContent;
-    setTranscript(finalText, interimText);
-    scheduleGlassesRender();
+    applyCaptionSnapshot(finalText, interimText);
   },
   (error) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -109,7 +107,7 @@ function scheduleGlassesRender(): void {
         content: currentContent
       })
     );
-  }, 120);
+  }, 90);
 }
 
 function eventTypeOf(
@@ -168,15 +166,206 @@ const unsubscribe = bridge.onEvenHubEvent((event) => {
 
 window.addEventListener("beforeunload", cleanup);
 
-function buildGlassesTranscript(finalText: string, interimText: string): string {
-  const finalUtterances = finalText
+function applyCaptionSnapshot(finalText: string, interimText: string): void {
+  const finalizedUtterances = splitTranscriptLines(finalText);
+
+  if (finalizedUtterances.length < finalizedUtteranceCount) {
+    resetCaptionState();
+  }
+
+  const newUtterances = finalizedUtterances.slice(finalizedUtteranceCount);
+  for (const utterance of newUtterances) {
+    commitFinalizedUtterance(utterance);
+  }
+
+  finalizedUtteranceCount = finalizedUtterances.length;
+  processInterim(interimText);
+  syncCaptionDisplays();
+}
+
+function processInterim(rawInterim: string): void {
+  const trimmedInterim = rawInterim.trim();
+  liveInterimText = trimmedInterim;
+
+  if (!trimmedInterim) {
+    lastRawInterim = "";
+    return;
+  }
+
+  const commonPrefix = getCommonPrefix(lastRawInterim, trimmedInterim);
+  const stablePrefix = getStableCommitPrefix(commonPrefix);
+
+  if (stablePrefix.length > committedInterimText.length) {
+    appendCaptionText(stablePrefix.slice(committedInterimText.length));
+    committedInterimText = stablePrefix;
+  }
+
+  lastRawInterim = trimmedInterim;
+}
+
+function commitFinalizedUtterance(utterance: string): void {
+  const normalizedUtterance = utterance.trim();
+  if (!normalizedUtterance) {
+    resetInterimTracking();
+    return;
+  }
+
+  const committedPrefix = normalizedUtterance.startsWith(committedInterimText)
+    ? committedInterimText
+    : getCommonPrefix(committedInterimText, normalizedUtterance);
+  const remainder = normalizedUtterance.slice(committedPrefix.length);
+
+  appendCaptionText(remainder);
+  sealActiveLine();
+  resetInterimTracking();
+}
+
+function appendCaptionText(text: string): void {
+  appendCaptionTextToState(captionState, text);
+}
+
+function appendCaptionTextToState(state: CaptionState, text: string): void {
+  const tokens = normalizeCaptionText(text);
+
+  for (const token of tokens) {
+    if (!token) {
+      continue;
+    }
+
+    const nextLine = state.activeLine
+      ? `${state.activeLine} ${token}`
+      : token;
+
+    if (nextLine.length <= MAX_ACTIVE_LINE_CHARACTERS) {
+      state.activeLine = nextLine;
+      continue;
+    }
+
+    rotateCaptionLines(state);
+    state.activeLine = token;
+  }
+}
+
+function sealActiveLine(): void {
+  if (!captionState.activeLine) {
+    return;
+  }
+
+  rotateCaptionLines(captionState);
+}
+
+function rotateCaptionLines(state: CaptionState): void {
+  state.line1 = state.line2;
+  state.line2 = state.activeLine;
+  state.activeLine = "";
+}
+
+function syncCaptionDisplays(): void {
+  currentContent = renderCaptionState(projectCaptionState());
+  setTranscript(currentContent);
+  scheduleGlassesRender();
+}
+
+function renderCaptionState(state: CaptionState): string {
+  const lines = [state.line1, state.line2, state.activeLine].filter(Boolean);
+
+  return lines.length > 0 ? lines.join("\n") : "Listening…";
+}
+
+function projectCaptionState(): CaptionState {
+  const projectedState = cloneCaptionState(captionState);
+  const previewTail = getLivePreviewTail();
+
+  if (previewTail) {
+    appendCaptionTextToState(projectedState, previewTail);
+  }
+
+  return projectedState;
+}
+
+function cloneCaptionState(state: CaptionState): CaptionState {
+  return {
+    line1: state.line1,
+    line2: state.line2,
+    activeLine: state.activeLine
+  };
+}
+
+function getLivePreviewTail(): string {
+  if (!liveInterimText) {
+    return "";
+  }
+
+  if (!committedInterimText) {
+    return liveInterimText;
+  }
+
+  if (liveInterimText.startsWith(committedInterimText)) {
+    return liveInterimText.slice(committedInterimText.length).trim();
+  }
+
+  return liveInterimText;
+}
+
+function splitTranscriptLines(text: string): string[] {
+  return text
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(-MAX_VISIBLE_FINAL_UTTERANCES);
+    .filter(Boolean);
+}
 
-  const interim = interimText.trim();
-  const parts = interim ? [...finalUtterances, interim] : finalUtterances;
+function normalizeCaptionText(text: string): string[] {
+  return text
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+}
 
-  return parts.length > 0 ? parts.join("\n") : "Listening…";
+function getCommonPrefix(left: string, right: string): string {
+  const maxLength = Math.min(left.length, right.length);
+  let index = 0;
+
+  while (index < maxLength && left[index] === right[index]) {
+    index += 1;
+  }
+
+  return left.slice(0, index);
+}
+
+function getStableCommitPrefix(text: string): string {
+  let boundaryIndex = -1;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (/\s/.test(character) || /[.,!?;:]/.test(character)) {
+      boundaryIndex = /\s/.test(character) ? index : index + 1;
+    }
+  }
+
+  if (boundaryIndex < 0) {
+    return "";
+  }
+
+  return text.slice(0, boundaryIndex).trim();
+}
+
+function resetCaptionState(): void {
+  captionState = createEmptyCaptionState();
+  finalizedUtteranceCount = 0;
+  resetInterimTracking();
+}
+
+function resetInterimTracking(): void {
+  lastRawInterim = "";
+  committedInterimText = "";
+  liveInterimText = "";
+}
+
+function createEmptyCaptionState(): CaptionState {
+  return {
+    line1: "",
+    line2: "",
+    activeLine: ""
+  };
 }

@@ -1,8 +1,7 @@
 type StatusKind = "idle" | "connecting" | "listening" | "error";
 
 let statusNode: HTMLDivElement | null = null;
-let finalNode: HTMLPreElement | null = null;
-let interimNode: HTMLPreElement | null = null;
+let transcriptNode: HTMLPreElement | null = null;
 
 export function mountUi(): void {
   const app = document.querySelector<HTMLDivElement>("#app");
@@ -19,14 +18,8 @@ export function mountUi(): void {
           <span>Waiting for Even bridge…</span>
         </div>
         <section class="transcript">
-          <div>
-            <h2>Transcript</h2>
-            <pre data-role="final-text">Listening…</pre>
-          </div>
-          <div>
-            <h2>Live transcript</h2>
-            <pre data-role="interim-text"></pre>
-          </div>
+          <h2>Transcript</h2>
+          <pre data-role="transcript">Listening…</pre>
         </section>
       </section>
     </main>
@@ -135,8 +128,7 @@ export function mountUi(): void {
   document.head.appendChild(style);
 
   statusNode = app.querySelector<HTMLDivElement>('[data-role="status"]');
-  finalNode = app.querySelector<HTMLPreElement>('[data-role="final-text"]');
-  interimNode = app.querySelector<HTMLPreElement>('[data-role="interim-text"]');
+  transcriptNode = app.querySelector<HTMLPreElement>('[data-role="transcript"]');
 }
 
 export function setStatus(kind: StatusKind, message: string): void {
@@ -148,13 +140,9 @@ export function setStatus(kind: StatusKind, message: string): void {
   statusNode.innerHTML = `<strong>${escapeHtml(kind)}</strong><span>${escapeHtml(message)}</span>`;
 }
 
-export function setTranscript(finalText: string, interimText: string): void {
-  if (finalNode) {
-    finalNode.textContent = finalText || "Listening…";
-  }
-
-  if (interimNode) {
-    interimNode.textContent = interimText;
+export function setTranscript(content: string): void {
+  if (transcriptNode) {
+    transcriptNode.textContent = content || "Listening…";
   }
 }
 
