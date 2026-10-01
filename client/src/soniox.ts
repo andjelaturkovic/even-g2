@@ -28,7 +28,7 @@ export function getSonioxClient(): SonioxClient {
 export function createRecordingSession(): Recording {
   return client.realtime.record({
     model: SONIOX_REALTIME_MODEL,
-    language_hints: ["hr", "en"],
+    language_hints: ["hr", "bs", "en"],
     auto_reconnect: true,
     max_reconnect_attempts: 3,
     reconnect_base_delay_ms: 1000,

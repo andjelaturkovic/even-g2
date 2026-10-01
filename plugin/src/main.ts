@@ -29,6 +29,7 @@ setStatus("connecting", "Waiting for Even bridge…");
 const bridge = await waitForEvenAppBridge();
 setStatus("connecting", "Even bridge connected · creating transcript page");
 const MAX_ACTIVE_LINE_CHARACTERS = 50;
+const CAPTION_INACTIVITY_TIMEOUT_MS = 60_000;
 
 const transcriptContainer = new TextContainerProperty({
   xPosition: 18,
@@ -59,6 +60,7 @@ if (result !== 0) {
 
 let lastRender = "";
 let renderTimer: number | null = null;
+let inactivityTimer: number | null = null;
 let currentContent = "Listening…";
 let hasSeenAudio = false;
 let cleanedUp = false;
@@ -67,6 +69,8 @@ let finalizedUtteranceCount = 0;
 let lastRawInterim = "";
 let committedInterimText = "";
 let liveInterimText = "";
+let lastObservedFinalText = "";
+let lastObservedInterimText = "";
 
 const stt = startSttStream(
   apiKey,
@@ -128,6 +132,10 @@ function cleanup(): void {
   }
 
   cleanedUp = true;
+  if (inactivityTimer !== null) {
+    window.clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+  }
   bridge.audioControl(false);
   stt.close();
   unsubscribe();
@@ -167,6 +175,22 @@ const unsubscribe = bridge.onEvenHubEvent((event) => {
 window.addEventListener("beforeunload", cleanup);
 
 function applyCaptionSnapshot(finalText: string, interimText: string): void {
+  const normalizedFinalText = finalText.trim();
+  const normalizedInterimText = interimText.trim();
+  const transcriptChanged =
+    normalizedFinalText !== lastObservedFinalText ||
+    normalizedInterimText !== lastObservedInterimText;
+
+  lastObservedFinalText = normalizedFinalText;
+  lastObservedInterimText = normalizedInterimText;
+
+  if (
+    transcriptChanged &&
+    (normalizedFinalText || normalizedInterimText)
+  ) {
+    resetCaptionInactivityTimer();
+  }
+
   const finalizedUtterances = splitTranscriptLines(finalText);
 
   if (finalizedUtterances.length < finalizedUtteranceCount) {
@@ -181,6 +205,21 @@ function applyCaptionSnapshot(finalText: string, interimText: string): void {
   finalizedUtteranceCount = finalizedUtterances.length;
   processInterim(interimText);
   syncCaptionDisplays();
+}
+
+function resetCaptionInactivityTimer(): void {
+  if (inactivityTimer !== null) {
+    window.clearTimeout(inactivityTimer);
+  }
+
+  inactivityTimer = window.setTimeout(() => {
+    inactivityTimer = null;
+    resetCaptionState();
+    stt.resetTranscript();
+    currentContent = "Listening…";
+    setTranscript(currentContent);
+    scheduleGlassesRender();
+  }, CAPTION_INACTIVITY_TIMEOUT_MS);
 }
 
 function processInterim(rawInterim: string): void {

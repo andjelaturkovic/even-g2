@@ -31,7 +31,7 @@ export function startSttStream(
     audio_format: "pcm_s16le",
     sample_rate: 16000,
     num_channels: 1,
-    language_hints: ["hr", "en"],
+    language_hints: ["hr", "bs", "en"],
     enable_endpoint_detection: true
   });
 
